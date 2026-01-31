@@ -1,0 +1,115 @@
+name: CD - Build and Push Images
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - 'service-manifest.json'
+
+env:
+  DOCKER_REGISTRY: sharonkurelovsky/sk-buy-app
+
+jobs:
+  build-and-push:
+    name: Build and Push Images
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Read versions from manifest
+        id: versions
+        run: |
+          WEB_VERSION=$(jq -r '.["customer-web-server"].version' service-manifest.json)
+          API_VERSION=$(jq -r '.["customer-management-api"].version' service-manifest.json)
+          UI_VERSION=$(jq -r '.["customer-ui"].version' service-manifest.json)
+          echo "WEB_VERSION=$WEB_VERSION" >> $GITHUB_OUTPUT
+          echo "API_VERSION=$API_VERSION" >> $GITHUB_OUTPUT
+          echo "UI_VERSION=$UI_VERSION" >> $GITHUB_OUTPUT
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push Web Server
+        run: |
+          VERSION=${{ steps.versions.outputs.WEB_VERSION }}
+          docker build --target production \
+            -t ${{ env.DOCKER_REGISTRY }}:customer-web-server-v${VERSION} \
+            -t ${{ env.DOCKER_REGISTRY }}:customer-web-server-latest \
+            ./code/customer-web-server
+          docker push ${{ env.DOCKER_REGISTRY }}:customer-web-server-v${VERSION}
+          docker push ${{ env.DOCKER_REGISTRY }}:customer-web-server-latest
+
+      - name: Build and push Management API
+        run: |
+          VERSION=${{ steps.versions.outputs.API_VERSION }}
+          docker build --target production \
+            -t ${{ env.DOCKER_REGISTRY }}:customer-management-api-v${VERSION} \
+            -t ${{ env.DOCKER_REGISTRY }}:customer-management-api-latest \
+            ./code/customer-management-api
+          docker push ${{ env.DOCKER_REGISTRY }}:customer-management-api-v${VERSION}
+          docker push ${{ env.DOCKER_REGISTRY }}:customer-management-api-latest
+
+      - name: Build and push UI
+        run: |
+          VERSION=${{ steps.versions.outputs.UI_VERSION }}
+          docker build \
+            -t ${{ env.DOCKER_REGISTRY }}:customer-ui-v${VERSION} \
+            -t ${{ env.DOCKER_REGISTRY }}:customer-ui-latest \
+            ./code/customer-ui
+          docker push ${{ env.DOCKER_REGISTRY }}:customer-ui-v${VERSION}
+          docker push ${{ env.DOCKER_REGISTRY }}:customer-ui-latest
+
+      - name: Increment versions in manifest
+        run: |
+          # Function to increment patch version
+          increment_version() {
+            local version=$1
+            local major=$(echo $version | cut -d. -f1)
+            local minor=$(echo $version | cut -d. -f2)
+            local patch=$(echo $version | cut -d. -f3)
+            echo "$major.$minor.$((patch + 1))"
+          }
+
+          # Get current versions
+          WEB_VERSION=${{ steps.versions.outputs.WEB_VERSION }}
+          API_VERSION=${{ steps.versions.outputs.API_VERSION }}
+          UI_VERSION=${{ steps.versions.outputs.UI_VERSION }}
+
+          # Calculate new versions
+          NEW_WEB_VERSION=$(increment_version $WEB_VERSION)
+          NEW_API_VERSION=$(increment_version $API_VERSION)
+          NEW_UI_VERSION=$(increment_version $UI_VERSION)
+
+          # Update manifest
+          jq --arg web "$NEW_WEB_VERSION" \
+             --arg api "$NEW_API_VERSION" \
+             --arg ui "$NEW_UI_VERSION" \
+             '.["customer-web-server"].version = $web |
+              .["customer-management-api"].version = $api |
+              .["customer-ui"].version = $ui' \
+             service-manifest.json > service-manifest.tmp && mv service-manifest.tmp service-manifest.json
+
+      - name: Commit updated manifest
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add service-manifest.json
+          git commit -m "chore: bump service versions [skip ci]"
+          git push
+
+      - name: Summary
+        run: |
+          echo "### Images Pushed :rocket:" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Service | Image | Next Version |" >> $GITHUB_STEP_SUMMARY
+          echo "|---------|-------|--------------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Web Server | \`${{ env.DOCKER_REGISTRY }}:customer-web-server-v${{ steps.versions.outputs.WEB_VERSION }}\` | $(jq -r '.["customer-web-server"].version' service-manifest.json) |" >> $GITHUB_STEP_SUMMARY
+          echo "| Management API | \`${{ env.DOCKER_REGISTRY }}:customer-management-api-v${{ steps.versions.outputs.API_VERSION }}\` | $(jq -r '.["customer-management-api"].version' service-manifest.json) |" >> $GITHUB_STEP_SUMMARY
+          echo "| UI | \`${{ env.DOCKER_REGISTRY }}:customer-ui-v${{ steps.versions.outputs.UI_VERSION }}\` | $(jq -r '.["customer-ui"].version' service-manifest.json) |" >> $GITHUB_STEP_SUMMARY
