@@ -19,6 +19,7 @@ from flask import Flask, request, jsonify
 from kafka import KafkaProducer
 from kafka.errors import KafkaError
 import requests
+from prometheus_flask_exporter import PrometheusMetrics
 
 # Configure logging
 logging.basicConfig(
@@ -33,6 +34,11 @@ KAFKA_TOPIC = os.getenv('KAFKA_TOPIC', 'purchases')
 CUSTOMER_MGMT_API_URL = os.getenv('CUSTOMER_MGMT_API_URL', 'http://customer-management-api:5001')
 
 app = Flask(__name__)
+
+# Initialize Prometheus metrics
+# This automatically tracks HTTP requests and exposes /metrics endpoint
+metrics = PrometheusMetrics(app)
+metrics.info('app_info', 'Customer Web Server', version='1.0.0')
 
 # Global Kafka producer instance (lazy initialization)
 _producer = None

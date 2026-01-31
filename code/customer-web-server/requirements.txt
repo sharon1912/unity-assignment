@@ -6,3 +6,6 @@ kafka-python-ng==2.2.2
 
 # HTTP client for calling Customer Management API
 requests==2.31.0
+
+# Prometheus metrics for monitoring and autoscaling
+prometheus-flask-exporter==0.23.0

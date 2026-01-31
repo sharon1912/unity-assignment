@@ -11,11 +11,13 @@ A microservices-based purchase tracking system built with Python, Apache Kafka, 
 3. [Code Structure](#code-structure)
 4. [Docker Images](#docker-images)
 5. [Kubernetes Deployment](#kubernetes-deployment)
-6. [Setup Instructions](#setup-instructions)
-7. [Testing the System](#testing-the-system)
-8. [API Reference](#api-reference)
-9. [Troubleshooting](#troubleshooting)
-10. [Cleanup](#cleanup)
+6. [Monitoring & Observability](#monitoring--observability)
+7. [Autoscaling](#autoscaling)
+8. [Setup Instructions](#setup-instructions)
+9. [Testing the System](#testing-the-system)
+10. [API Reference](#api-reference)
+11. [Troubleshooting](#troubleshooting)
+12. [Cleanup](#cleanup)
 
 ---
 
@@ -24,12 +26,14 @@ A microservices-based purchase tracking system built with Python, Apache Kafka, 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                              KUBERNETES CLUSTER                              │
-│                            (namespace: purchase-system)                      │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                            namespace: purchase-system                        │
 │                                                                             │
 │  ┌─────────────────────┐         ┌─────────────────────────────────────┐   │
 │  │  Customer Web       │         │  Customer Management API            │   │
 │  │  Server             │         │                                     │   │
 │  │  (Port 5000)        │         │  (Port 5001)                        │   │
+│  │  /metrics ◄─────────┼─────────┼──────────────────► /metrics         │   │
 │  │                     │         │  ┌─────────────────────────────┐   │   │
 │  │  POST /buy ─────────┼─────────┼──► Kafka Consumer (Background) │   │   │
 │  │         │           │  Kafka  │  │         │                   │   │   │
@@ -47,6 +51,7 @@ A microservices-based purchase tracking system built with Python, Apache Kafka, 
 │  │         └───────────┼─────────┼──┤  MongoDB    │                   │   │
 │  │                     │  JSON   │  │  Read       │                   │   │
 │  │                     │         │  └─────────────┘                   │   │
+│  │  HPA (2-10 pods)    │         │  HPA (1-5 pods)                    │   │
 │  └─────────────────────┘         └─────────────────────────────────────┘   │
 │           ▲                                                                 │
 │           │ NodePort :30080                                                │
@@ -56,6 +61,14 @@ A microservices-based purchase tracking system built with Python, Apache Kafka, 
 │  │  Traffic        │              │  (KRaft)    │    │  (StatefulSet)  │   │
 │  └─────────────────┘              │  Port 9092  │    │   Port 27017    │   │
 │                                   └─────────────┘    └─────────────────┘   │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                             namespace: monitoring                            │
+│                                                                             │
+│  ┌─────────────────────┐    ┌─────────────────────┐                        │
+│  │  Prometheus         │    │  Prometheus         │                        │
+│  │  Server             │───►│  Adapter            │──► Custom Metrics API  │
+│  │  (scrapes /metrics) │    │  (exposes to HPA)   │                        │
+│  └─────────────────────┘    └─────────────────────┘                        │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -156,27 +169,30 @@ home-assigment/
 │
 ├── code/
 │   ├── customer-web-server/
-│   │   ├── app.py                         # Main Flask application
+│   │   ├── app.py                         # Main Flask application + Prometheus metrics
 │   │   ├── requirements.txt               # Python dependencies
 │   │   └── Dockerfile                     # Container build instructions
 │   │
 │   └── customer-management-api/
-│       ├── app.py                         # Flask app + Kafka consumer
+│       ├── app.py                         # Flask app + Kafka consumer + Prometheus metrics
 │       ├── requirements.txt               # Python dependencies
 │       └── Dockerfile                     # Container build instructions
 │
 └── deployment/
     ├── namespace.yaml                     # Kubernetes namespace
+    ├── AUTOSCALING.md                     # Detailed autoscaling documentation
     ├── database/
     │   └── mongodb.yaml                   # MongoDB StatefulSet + Service
     ├── kafka/
     │   └── kafka.yaml                     # Kafka Deployment + Service (KRaft)
     ├── customer-web-server/
-    │   ├── deployment.yaml                # Web server Deployment
-    │   └── service.yaml                   # Web server Service (NodePort)
+    │   ├── deployment.yaml                # Web server Deployment + Prometheus annotations
+    │   ├── service.yaml                   # Web server Service (NodePort)
+    │   └── hpa.yaml                       # Horizontal Pod Autoscaler (2-10 pods)
     └── customer-management-api/
-        ├── deployment.yaml                # Management API Deployment
-        └── service.yaml                   # Management API Service (ClusterIP)
+        ├── deployment.yaml                # Management API Deployment + Prometheus annotations
+        ├── service.yaml                   # Management API Service (ClusterIP)
+        └── hpa.yaml                       # Horizontal Pod Autoscaler (1-5 pods)
 ```
 
 ### Code Walkthrough
@@ -420,6 +436,122 @@ env:
 
 ---
 
+## Monitoring & Observability
+
+The system includes Prometheus metrics for monitoring HTTP requests, latency, and Kafka message processing.
+
+### Prometheus Stack
+
+| Component | Namespace | Purpose |
+|-----------|-----------|---------|
+| Prometheus Server | `monitoring` | Scrapes and stores metrics |
+| Prometheus Adapter | `monitoring` | Exposes metrics to Kubernetes HPA |
+| Metrics Server | `kube-system` | Provides resource metrics (CPU/memory) |
+
+### Exposed Metrics
+
+Both services expose metrics at the `/metrics` endpoint using `prometheus-flask-exporter`.
+
+| Metric | Type | Description |
+|--------|------|-------------|
+| `flask_http_request_total` | Counter | Total HTTP requests by method/status/path |
+| `flask_http_request_duration_seconds` | Histogram | HTTP request latency distribution |
+| `kafka_messages_processed_total` | Counter | Kafka messages processed (success/error) |
+| `kafka_message_processing_seconds` | Histogram | Kafka message processing time |
+
+### Prometheus Annotations
+
+Deployments include annotations for automatic service discovery:
+
+```yaml
+annotations:
+  prometheus.io/scrape: "true"
+  prometheus.io/port: "5000"
+  prometheus.io/path: "/metrics"
+```
+
+### Accessing Prometheus UI
+
+```bash
+kubectl port-forward svc/prometheus-server 9090:80 -n monitoring
+# Open http://localhost:9090
+```
+
+### Example Queries
+
+```promql
+# Request rate per service
+rate(flask_http_request_total[5m])
+
+# 95th percentile latency
+histogram_quantile(0.95, rate(flask_http_request_duration_seconds_bucket[5m]))
+
+# Kafka processing rate
+rate(kafka_messages_processed_total[5m])
+```
+
+---
+
+## Autoscaling
+
+The system uses Horizontal Pod Autoscalers (HPA) to automatically scale based on HTTP request rate.
+
+### HPA Configuration
+
+| Service | Min Pods | Max Pods | Scale Up Trigger |
+|---------|----------|----------|------------------|
+| customer-web-server | 2 | 10 | > 10 req/sec per pod |
+| customer-management-api | 1 | 5 | > 10 req/sec per pod |
+
+### How It Works
+
+1. **Prometheus** scrapes `/metrics` from each pod
+2. **Prometheus Adapter** exposes `flask_http_request_per_second` as a custom metric
+3. **HPA** monitors the metric and scales pods accordingly
+
+### Check HPA Status
+
+```bash
+kubectl get hpa -n purchase-system
+
+# Expected output:
+# NAME                          REFERENCE                            TARGETS   MINPODS   MAXPODS   REPLICAS
+# customer-web-server-hpa       Deployment/customer-web-server       0/10      2         10        2
+# customer-management-api-hpa   Deployment/customer-management-api   0/10      1         5         1
+```
+
+### Test Autoscaling
+
+Generate load to trigger scaling:
+
+```bash
+# Install hey (load testing tool)
+brew install hey
+
+# Generate 1000 requests with 50 concurrent connections
+hey -n 1000 -c 50 -m POST \
+    -H "Content-Type: application/json" \
+    -d '{"username":"loadtest","userid":"test","price":10}' \
+    http://localhost:30080/buy
+
+# Watch HPA react
+kubectl get hpa -n purchase-system -w
+```
+
+### Scaling Behavior
+
+**Scale Up:**
+- Stabilization window: 30 seconds
+- Can add up to 2 pods at a time or double the current count
+
+**Scale Down:**
+- Stabilization window: 5 minutes (prevents thrashing)
+- Removes 1 pod at a time
+
+For advanced autoscaling options (KEDA, custom metrics), see `deployment/AUTOSCALING.md`.
+
+---
+
 ## Setup Instructions
 
 ### Prerequisites
@@ -482,7 +614,58 @@ kubectl wait --for=condition=ready pod -l app=customer-web-server -n purchase-sy
 kubectl wait --for=condition=ready pod -l app=customer-management-api -n purchase-system --timeout=60s
 ```
 
-### Step 4: Verify Deployment
+### Step 4: Deploy Monitoring Stack (Optional but Recommended)
+
+```bash
+# Add Prometheus Helm repository
+helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+helm repo update
+
+# Install Prometheus
+helm install prometheus prometheus-community/prometheus \
+    --namespace monitoring \
+    --create-namespace \
+    --set server.persistentVolume.enabled=false \
+    --set alertmanager.enabled=false
+
+# Install Metrics Server (for resource metrics)
+kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml
+
+# Patch for local Kubernetes (Docker Desktop/minikube)
+kubectl patch deployment metrics-server -n kube-system --type='json' \
+    -p='[{"op": "add", "path": "/spec/template/spec/containers/0/args/-", "value": "--kubelet-insecure-tls"}]'
+
+# Install Prometheus Adapter (for custom metrics HPA)
+cat <<EOF | helm install prometheus-adapter prometheus-community/prometheus-adapter \
+    --namespace monitoring -f -
+prometheus:
+  url: http://prometheus-server.monitoring.svc.cluster.local
+  port: 80
+rules:
+  custom:
+    - seriesQuery: 'flask_http_request_total{namespace!="",pod!=""}'
+      resources:
+        overrides:
+          namespace: {resource: "namespace"}
+          pod: {resource: "pod"}
+      name:
+        matches: "^(.*)_total$"
+        as: "\${1}_per_second"
+      metricsQuery: 'sum(rate(<<.Series>>{<<.LabelMatchers>>}[2m])) by (<<.GroupBy>>)'
+EOF
+```
+
+### Step 5: Apply HPAs
+
+```bash
+kubectl apply -f deployment/customer-web-server/hpa.yaml
+kubectl apply -f deployment/customer-management-api/hpa.yaml
+
+# Verify HPAs
+kubectl get hpa -n purchase-system
+```
+
+### Step 6: Verify Deployment
 
 ```bash
 # Check all pods are running
@@ -498,6 +681,9 @@ kubectl get pods -n purchase-system
 
 # Check services
 kubectl get svc -n purchase-system
+
+# Check monitoring pods
+kubectl get pods -n monitoring
 ```
 
 ---
@@ -733,6 +919,33 @@ kubectl logs deployment/customer-management-api -n purchase-system | tail -50
 kubectl logs deployment/customer-web-server -n purchase-system | grep "Published purchase"
 ```
 
+**5. HPA shows `<unknown>` targets:**
+```bash
+# Check if metrics-server is running
+kubectl get pods -n kube-system | grep metrics-server
+
+# Check if custom metrics API is available
+kubectl get --raw /apis/custom.metrics.k8s.io/v1beta1 | head
+
+# Verify Prometheus Adapter is running
+kubectl get pods -n monitoring | grep prometheus-adapter
+
+# Generate some traffic to populate metrics
+curl -X POST http://localhost:30080/buy \
+    -H "Content-Type: application/json" \
+    -d '{"username":"test","userid":"test","price":10}'
+```
+
+**6. Prometheus not scraping targets:**
+```bash
+# Check Prometheus targets
+kubectl port-forward svc/prometheus-server 9090:80 -n monitoring
+# Open http://localhost:9090/targets
+
+# Verify pod annotations
+kubectl get pods -n purchase-system -o jsonpath='{.items[*].metadata.annotations}' | jq
+```
+
 ---
 
 ## Cleanup
@@ -768,11 +981,13 @@ docker rmi customer-web-server:latest customer-management-api:latest
 ## Future Improvements
 
 - [ ] Add authentication/authorization (JWT tokens)
-- [ ] Add Prometheus metrics endpoints
+- [x] Add Prometheus metrics endpoints
 - [ ] Add structured logging with correlation IDs
 - [ ] Use Helm charts for easier deployment
-- [ ] Add horizontal pod autoscaling
+- [x] Add horizontal pod autoscaling
 - [ ] Add MongoDB authentication
 - [ ] Add Kafka Schema Registry for message validation
 - [ ] Add integration tests
 - [ ] Add CI/CD pipeline
+- [ ] Add Grafana dashboards for visualization
+- [ ] Add alerting rules for Prometheus

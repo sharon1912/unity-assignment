@@ -6,3 +6,7 @@ kafka-python-ng==2.2.2
 
 # MongoDB client
 pymongo==4.6.0
+
+# Prometheus metrics for monitoring and autoscaling
+prometheus-flask-exporter==0.23.0
+prometheus-client==0.19.0

@@ -1,0 +1,52 @@
+# Horizontal Pod Autoscaler for Customer Management API
+# Scales based on HTTP requests per second (via Prometheus custom metrics)
+#
+# Note: This service has a Kafka consumer, so scaling requires careful consideration:
+# - Multiple replicas will share the Kafka consumer group
+# - Kafka will distribute partitions across consumers
+# - For optimal scaling, ensure the Kafka topic has multiple partitions
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: customer-management-api-hpa
+  namespace: purchase-system
+  labels:
+    app: customer-management-api
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: customer-management-api
+
+  # Pod count boundaries
+  # Note: maxReplicas should not exceed Kafka topic partition count
+  minReplicas: 1      # Minimum pods
+  maxReplicas: 5      # Maximum pods (limited by Kafka partitions)
+
+  # Scaling metrics
+  metrics:
+    # Scale based on HTTP requests per second (from Prometheus)
+    # When average requests/sec per pod > 10, scale up
+    - type: Pods
+      pods:
+        metric:
+          name: flask_http_request_per_second
+        target:
+          type: AverageValue
+          averageValue: "10"    # Scale up when > 10 req/sec per pod
+
+  # Scaling behavior
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 60    # Wait 1 min before scaling up
+      policies:
+        - type: Pods
+          value: 1                       # Add 1 pod at a time
+          periodSeconds: 60
+
+    scaleDown:
+      stabilizationWindowSeconds: 300   # Wait 5 min before scaling down
+      policies:
+        - type: Pods
+          value: 1                       # Remove 1 pod at a time
+          periodSeconds: 120

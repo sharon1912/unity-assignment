@@ -20,6 +20,8 @@ from pymongo import MongoClient
 from pymongo.errors import ConnectionFailure
 from kafka import KafkaConsumer
 from kafka.errors import KafkaError
+from prometheus_flask_exporter import PrometheusMetrics
+from prometheus_client import Counter, Histogram
 
 # Configure logging
 logging.basicConfig(
@@ -37,6 +39,21 @@ MONGODB_DATABASE = os.getenv('MONGODB_DATABASE', 'purchase_db')
 MONGODB_COLLECTION = os.getenv('MONGODB_COLLECTION', 'purchases')
 
 app = Flask(__name__)
+
+# Initialize Prometheus metrics for HTTP endpoints
+metrics = PrometheusMetrics(app)
+metrics.info('app_info', 'Customer Management API', version='1.0.0')
+
+# Custom Prometheus metrics for Kafka consumer
+kafka_messages_processed = Counter(
+    'kafka_messages_processed_total',
+    'Total Kafka messages processed',
+    ['status']
+)
+kafka_processing_time = Histogram(
+    'kafka_message_processing_seconds',
+    'Time spent processing Kafka messages'
+)
 
 # MongoDB connection (global for Flask routes)
 mongo_client = None
@@ -89,6 +106,7 @@ def start_kafka_consumer():
 
     # Process messages indefinitely
     for message in consumer:
+        start_time = time.time()
         try:
             purchase_data = message.value
             logger.info(f"Received purchase: userid={purchase_data.get('userid')}, price={purchase_data.get('price')}")
@@ -97,9 +115,16 @@ def start_kafka_consumer():
             result = collection.insert_one(purchase_data)
             logger.info(f"Stored in MongoDB with ID: {result.inserted_id}")
 
+            # Record success metrics
+            kafka_messages_processed.labels(status='success').inc()
+
         except Exception as e:
             logger.error(f"Error processing message: {str(e)}")
+            kafka_messages_processed.labels(status='error').inc()
             # Continue processing other messages even if one fails
+        finally:
+            # Record processing time
+            kafka_processing_time.observe(time.time() - start_time)
 
 
 @app.route('/purchases/<userid>', methods=['GET'])

@@ -16,6 +16,10 @@ spec:
     metadata:
       labels:
         app: customer-management-api
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "5001"
+        prometheus.io/path: "/metrics"
     spec:
       containers:
         - name: customer-management-api

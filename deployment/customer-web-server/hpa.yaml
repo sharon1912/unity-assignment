@@ -1,0 +1,57 @@
+# Horizontal Pod Autoscaler for Customer Web Server
+# Scales based on HTTP requests per second (via Prometheus custom metrics)
+#
+# How it works:
+# - When average HTTP requests/sec per pod exceeds threshold, HPA adds more pods
+# - Uses Prometheus Adapter to expose flask_http_request_per_second metric
+# - Scaling is gradual to avoid thrashing
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: customer-web-server-hpa
+  namespace: purchase-system
+  labels:
+    app: customer-web-server
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: customer-web-server
+
+  # Pod count boundaries
+  minReplicas: 2      # Minimum pods (for high availability)
+  maxReplicas: 10     # Maximum pods (cost control)
+
+  # Scaling metrics
+  metrics:
+    # Scale based on HTTP requests per second (from Prometheus)
+    # When average requests/sec per pod > 10, scale up
+    - type: Pods
+      pods:
+        metric:
+          name: flask_http_request_per_second
+        target:
+          type: AverageValue
+          averageValue: "10"    # Scale up when > 10 req/sec per pod
+
+  # Scaling behavior (fine-tune scaling speed)
+  behavior:
+    # Scale up quickly when under load
+    scaleUp:
+      stabilizationWindowSeconds: 30    # Wait 30s before scaling up
+      policies:
+        - type: Pods
+          value: 2                       # Add up to 2 pods at a time
+          periodSeconds: 30
+        - type: Percent
+          value: 100                     # Or double the pods
+          periodSeconds: 30
+      selectPolicy: Max                  # Use whichever adds more pods
+
+    # Scale down slowly to avoid thrashing
+    scaleDown:
+      stabilizationWindowSeconds: 300   # Wait 5 min before scaling down
+      policies:
+        - type: Pods
+          value: 1                       # Remove 1 pod at a time
+          periodSeconds: 60
