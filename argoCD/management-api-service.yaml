@@ -1,0 +1,20 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: customer-management-api
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/sharon1912/unity-assignment.git
+    targetRevision: HEAD
+    path: deployment/customer-management-api
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: purchase-system
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

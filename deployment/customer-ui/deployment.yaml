@@ -18,8 +18,8 @@ spec:
     spec:
       containers:
         - name: customer-ui
-          image: customer-ui:latest
-          imagePullPolicy: Never
+          image: sharonkurelovsky/sk-buy-app:customer-ui-v1.0.0
+          imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 80
           resources:

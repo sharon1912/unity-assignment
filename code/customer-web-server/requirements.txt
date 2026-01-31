@@ -9,3 +9,6 @@ requests==2.31.0
 
 # Prometheus metrics for monitoring and autoscaling
 prometheus-flask-exporter==0.23.0
+
+# Testing
+pytest==8.0.0

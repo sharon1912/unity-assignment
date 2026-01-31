@@ -1,0 +1,14 @@
+{
+    "customer-management-api": {
+        "version" : "1.0.0",
+        "description" : "Customer Management API Service"
+    },
+    "customer-web-server": {
+        "version" : "1.0.0",
+        "description" : "Customer Web Server Service"
+    },
+    "customer-ui": {
+        "version" : "1.0.0",
+        "description" : "Customer UI Service"
+    }
+}

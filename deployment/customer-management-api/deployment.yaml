@@ -23,7 +23,7 @@ spec:
     spec:
       containers:
         - name: customer-management-api
-          image: customer-management-api:latest
+          image: sharonkurelovsky/sk-buy-app:customer-management-api-v1.0.0
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 5001

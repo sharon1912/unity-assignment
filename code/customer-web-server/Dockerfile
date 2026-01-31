@@ -1,26 +1,43 @@
 # Customer Web Server Dockerfile
-# Builds a lightweight Python image for the customer-facing web service
+# Multi-stage build: test and production targets
 
-FROM python:3.11-slim
+# ============ Base Stage ============
+FROM python:3.11-slim AS base
 
-# Set working directory
 WORKDIR /app
 
-# Copy requirements first (for layer caching)
 COPY requirements.txt .
 
-# Install dependencies
-RUN pip install --no-cache-dir -r requirements.txt
-
-# Copy application code
-COPY . .
-
 # Create non-root user for security
-RUN useradd -m appuser && chown -R appuser:appuser /app
-USER appuser
+RUN useradd -m appuser
 
-# Expose the Flask port
 EXPOSE 5000
 
-# Run the application
+# ============ Production Stage ============
+FROM base AS production
+
+# Install only production dependencies (exclude pytest)
+RUN grep -v "pytest" requirements.txt > requirements-prod.txt && \
+    pip install --no-cache-dir -r requirements-prod.txt
+
+# Copy only application code (no tests)
+COPY app.py .
+
+RUN chown -R appuser:appuser /app
+USER appuser
+
 CMD ["python", "app.py"]
+
+# ============ Test Stage ============
+FROM base AS test
+
+# Install all dependencies including pytest
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy everything including tests
+COPY . .
+
+RUN chown -R appuser:appuser /app
+USER appuser
+
+CMD ["pytest", "tests/", "-v"]

@@ -193,6 +193,11 @@ home-assigment/
 ├── README.md                              # This file
 │
 ├── code/
+│   ├── customer-ui/
+│   │   ├── index.html                     # Frontend UI (HTML/CSS/JS)
+│   │   ├── nginx.conf                     # Nginx config (static files + API proxy)
+│   │   └── Dockerfile                     # Container build instructions
+│   │
 │   ├── customer-web-server/
 │   │   ├── app.py                         # Main Flask application + Prometheus metrics
 │   │   ├── requirements.txt               # Python dependencies
@@ -210,10 +215,13 @@ home-assigment/
     │   └── mongodb.yaml                   # MongoDB StatefulSet + Service
     ├── kafka/
     │   └── kafka.yaml                     # Kafka Deployment + Service (KRaft)
+    ├── customer-ui/
+    │   ├── deployment.yaml                # UI Deployment
+    │   ├── service.yaml                   # UI Service (ClusterIP)
+    │   └── ingress.yaml                   # Nginx Ingress (shop.local)
     ├── customer-web-server/
     │   ├── deployment.yaml                # Web server Deployment + Prometheus annotations
     │   ├── service.yaml                   # Web server Service (ClusterIP)
-    │   ├── ingress.yaml                   # Nginx Ingress (purchase.local)
     │   └── hpa.yaml                       # Horizontal Pod Autoscaler (2-10 pods)
     └── customer-management-api/
         ├── deployment.yaml                # Management API Deployment + Prometheus annotations
@@ -325,6 +333,7 @@ if __name__ == '__main__':
 
 | Component | Image | Description |
 |-----------|-------|-------------|
+| Customer UI | `customer-ui:latest` | Built locally from `code/customer-ui/` |
 | Customer Web Server | `customer-web-server:latest` | Built locally from `code/customer-web-server/` |
 | Customer Management API | `customer-management-api:latest` | Built locally from `code/customer-management-api/` |
 | Kafka | `apache/kafka:latest` | Official Apache Kafka image with KRaft support |
@@ -333,6 +342,9 @@ if __name__ == '__main__':
 ### Building Application Images
 
 ```bash
+# Build Customer UI
+docker build -t customer-ui:latest ./code/customer-ui
+
 # Build Customer Web Server
 docker build -t customer-web-server:latest ./code/customer-web-server
 
@@ -384,7 +396,8 @@ metadata:
 
 | Service | Type | Port | Description |
 |---------|------|------|-------------|
-| `customer-web-server` | ClusterIP | 80 | Internal, exposed via Ingress |
+| `customer-ui` | ClusterIP | 80 | UI frontend, exposed via Ingress |
+| `customer-web-server` | ClusterIP | 80 | Internal (called by UI proxy) |
 | `customer-management-api` | ClusterIP | 5001 | Internal only (called by web server) |
 | `kafka` | ClusterIP | 9092 | Internal only (message broker) |
 | `mongodb` | ClusterIP (Headless) | 27017 | Internal only (database) |
@@ -393,12 +406,18 @@ metadata:
 
 | Ingress | Host | Path | Backend |
 |---------|------|------|---------|
-| `customer-web-server-ingress` | `purchase.local` | `/` | `customer-web-server:80` |
+| `customer-ui-ingress` | `shop.local` | `/` | `customer-ui:80` |
+
+The UI's Nginx proxies API requests internally:
+- `http://shop.local/` → UI frontend
+- `http://shop.local/buy` → proxied to `customer-web-server:80`
+- `http://shop.local/getAllUserBuys/*` → proxied to `customer-web-server:80`
 
 ### Deployments
 
 | Deployment | Replicas | Image | Purpose |
 |------------|----------|-------|---------|
+| `customer-ui` | 1 | `customer-ui:latest` | Web UI frontend |
 | `customer-web-server` | 2 | `customer-web-server:latest` | Handle customer requests |
 | `customer-management-api` | 1 | `customer-management-api:latest` | Kafka consumer + API |
 | `kafka` | 1 | `apache/kafka:latest` | Message broker |
@@ -564,7 +583,7 @@ brew install hey
 hey -n 1000 -c 50 -m POST \
     -H "Content-Type: application/json" \
     -d '{"username":"loadtest","userid":"test","price":10}' \
-    http://purchase.local/buy
+    http://shop.local/buy
 
 # Watch HPA react
 kubectl get hpa -n purchase-system -w
@@ -613,13 +632,15 @@ kind create cluster
 ```bash
 cd home-assigment
 
-# Build both images
+# Build all images
+docker build -t customer-ui:latest ./code/customer-ui
 docker build -t customer-web-server:latest ./code/customer-web-server
 docker build -t customer-management-api:latest ./code/customer-management-api
 ```
 
 **For kind users**, load images into the cluster:
 ```bash
+kind load docker-image customer-ui:latest
 kind load docker-image customer-web-server:latest
 kind load docker-image customer-management-api:latest
 ```
@@ -634,7 +655,7 @@ kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/cont
 kubectl rollout status deployment/ingress-nginx-controller -n ingress-nginx --timeout=90s
 
 # Add hostname to /etc/hosts (for local testing)
-echo "127.0.0.1 purchase.local" | sudo tee -a /etc/hosts
+echo "127.0.0.1 shop.local" | sudo tee -a /etc/hosts
 ```
 
 ### Step 4: Deploy to Kubernetes
@@ -650,11 +671,15 @@ kubectl apply -f deployment/database/mongodb.yaml
 kubectl apply -f deployment/kafka/kafka.yaml
 kubectl wait --for=condition=ready pod -l app=kafka -n purchase-system --timeout=120s
 
-# Deploy applications (includes ingress)
+# Deploy backend services
 kubectl apply -f deployment/customer-management-api/
 kubectl apply -f deployment/customer-web-server/
 
+# Deploy UI (includes ingress)
+kubectl apply -f deployment/customer-ui/
+
 # Wait for all pods to be ready
+kubectl wait --for=condition=ready pod -l app=customer-ui -n purchase-system --timeout=60s
 kubectl wait --for=condition=ready pod -l app=customer-web-server -n purchase-system --timeout=60s
 kubectl wait --for=condition=ready pod -l app=customer-management-api -n purchase-system --timeout=60s
 ```
@@ -718,14 +743,15 @@ kubectl get pods -n purchase-system
 
 # Expected output:
 # NAME                                       READY   STATUS    RESTARTS   AGE
+# customer-ui-xxxxx                          1/1     Running   0          1m
 # customer-management-api-xxxxx              1/1     Running   0          1m
 # customer-web-server-xxxxx                  1/1     Running   0          1m
 # customer-web-server-yyyyy                  1/1     Running   0          1m
 # kafka-xxxxx                                1/1     Running   0          2m
 # mongodb-0                                  1/1     Running   0          2m
 
-# Check services
-kubectl get svc -n purchase-system
+# Check services and ingress
+kubectl get svc,ingress -n purchase-system
 
 # Check monitoring pods
 kubectl get pods -n monitoring
@@ -735,22 +761,43 @@ kubectl get pods -n monitoring
 
 ## Testing the System
 
-### Access the API
+### Access the UI
 
-The Customer Web Server is exposed via Nginx Ingress at `http://purchase.local`:
+The Customer UI is exposed via Nginx Ingress at `http://shop.local`:
 
 ```bash
-# If /etc/hosts is configured
-curl http://purchase.local/health
+# If /etc/hosts is configured, open in browser:
+open http://shop.local
 
-# Alternative: use Host header (no /etc/hosts needed)
-curl -H "Host: purchase.local" http://localhost/health
+# Alternative: use Host header for curl testing
+curl -H "Host: shop.local" http://localhost/
+```
+
+### Using the UI
+
+1. **Open the UI** at `http://shop.local`
+2. **Make a Purchase:**
+   - Fill in Username, User ID, and Price
+   - Click the **"Buy"** button
+   - See success message with purchase details
+3. **View Purchase History:**
+   - Enter a User ID in the search field
+   - Click the **"getAllUserBuys"** button
+   - See all purchases, total count, and total spent
+
+### API Testing (via curl)
+
+You can also test the API directly through the UI's proxy:
+
+```bash
+# Test via UI proxy
+curl -H "Host: shop.local" http://localhost/health
 ```
 
 ### Test 1: Create a Purchase
 
 ```bash
-curl -X POST http://purchase.local/buy \
+curl -X POST -H "Host: shop.local" http://localhost/buy \
   -H "Content-Type: application/json" \
   -d '{"username": "john", "userid": "user123", "price": 29.99}'
 ```
@@ -773,7 +820,7 @@ curl -X POST http://purchase.local/buy \
 
 ```bash
 # Wait a moment for Kafka to process, then:
-curl http://purchase.local/getAllUserBuys/user123
+curl http://shop.local/getAllUserBuys/user123
 ```
 
 **Expected Response:**
@@ -797,17 +844,17 @@ curl http://purchase.local/getAllUserBuys/user123
 
 ```bash
 # Add more purchases
-curl -X POST http://purchase.local/buy \
+curl -X POST http://shop.local/buy \
   -H "Content-Type: application/json" \
   -d '{"username": "john", "userid": "user123", "price": 15.50}'
 
-curl -X POST http://purchase.local/buy \
+curl -X POST http://shop.local/buy \
   -H "Content-Type: application/json" \
   -d '{"username": "john", "userid": "user123", "price": 42.00}'
 
 # Check total
 sleep 2
-curl http://purchase.local/getAllUserBuys/user123 | python3 -m json.tool
+curl http://shop.local/getAllUserBuys/user123 | python3 -m json.tool
 ```
 
 **Expected Response:**
@@ -828,34 +875,34 @@ curl http://purchase.local/getAllUserBuys/user123 | python3 -m json.tool
 
 ```bash
 # Create purchase for different user
-curl -X POST http://purchase.local/buy \
+curl -X POST http://shop.local/buy \
   -H "Content-Type: application/json" \
   -d '{"username": "jane", "userid": "user456", "price": 99.99}'
 
 # Query each user separately
-curl http://purchase.local/getAllUserBuys/user123
-curl http://purchase.local/getAllUserBuys/user456
+curl http://shop.local/getAllUserBuys/user123
+curl http://shop.local/getAllUserBuys/user456
 ```
 
 ### Test 5: Error Handling
 
 ```bash
 # Missing required field
-curl -X POST http://purchase.local/buy \
+curl -X POST http://shop.local/buy \
   -H "Content-Type: application/json" \
   -d '{"username": "john"}'
 
 # Expected: {"error": "Missing required fields: ['userid', 'price']"}
 
 # Invalid price
-curl -X POST http://purchase.local/buy \
+curl -X POST http://shop.local/buy \
   -H "Content-Type: application/json" \
   -d '{"username": "john", "userid": "user123", "price": "invalid"}'
 
 # Expected: {"error": "Price must be a valid number"}
 
 # User with no purchases
-curl http://purchase.local/getAllUserBuys/nonexistent
+curl http://shop.local/getAllUserBuys/nonexistent
 
 # Expected: {"userid": "nonexistent", "purchases": [], "count": 0, "total_spent": 0}
 ```
@@ -864,7 +911,7 @@ curl http://purchase.local/getAllUserBuys/nonexistent
 
 ```bash
 # Customer Web Server health
-curl http://purchase.local/health
+curl http://shop.local/health
 # Expected: {"status": "healthy"}
 
 # Customer Management API health (via port-forward)
@@ -877,7 +924,7 @@ curl http://localhost:5001/health
 
 ## API Reference
 
-### Customer Web Server (via Ingress: http://purchase.local)
+### Customer UI & API (via Ingress: http://shop.local)
 
 | Endpoint | Method | Description | Request Body | Response |
 |----------|--------|-------------|--------------|----------|
@@ -975,7 +1022,7 @@ kubectl get --raw /apis/custom.metrics.k8s.io/v1beta1 | head
 kubectl get pods -n monitoring | grep prometheus-adapter
 
 # Generate some traffic to populate metrics
-curl -X POST http://purchase.local/buy \
+curl -X POST http://shop.local/buy \
     -H "Content-Type: application/json" \
     -d '{"username":"test","userid":"test","price":10}'
 ```
@@ -1007,10 +1054,10 @@ kubectl delete namespace monitoring
 kubectl delete namespace ingress-nginx
 
 # Remove hostname from /etc/hosts (optional)
-sudo sed -i '' '/purchase.local/d' /etc/hosts
+sudo sed -i '' '/shop.local/d' /etc/hosts
 
 # Remove local Docker images (optional)
-docker rmi customer-web-server:latest customer-management-api:latest
+docker rmi customer-ui:latest customer-web-server:latest customer-management-api:latest
 ```
 
 ---
@@ -1030,19 +1077,3 @@ docker rmi customer-web-server:latest customer-management-api:latest
 | `MONGODB_COLLECTION` | Mgmt API | `purchases` | MongoDB collection name |
 
 ---
-
-## Future Improvements
-
-- [ ] Add authentication/authorization (JWT tokens)
-- [x] Add Prometheus metrics endpoints
-- [ ] Add structured logging with correlation IDs
-- [ ] Use Helm charts for easier deployment
-- [x] Add horizontal pod autoscaling
-- [x] Add Nginx Ingress for external access
-- [ ] Add MongoDB authentication
-- [ ] Add Kafka Schema Registry for message validation
-- [ ] Add integration tests
-- [ ] Add CI/CD pipeline
-- [ ] Add Grafana dashboards for visualization
-- [ ] Add alerting rules for Prometheus
-- [ ] Add TLS/HTTPS support for Ingress
