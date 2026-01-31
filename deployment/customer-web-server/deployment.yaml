@@ -1,0 +1,54 @@
+# Customer Web Server Deployment
+# The customer-facing service that handles /buy and /getAllUserBuys requests
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: customer-web-server
+  namespace: purchase-system
+  labels:
+    app: customer-web-server
+spec:
+  replicas: 2  # Two replicas for high availability
+  selector:
+    matchLabels:
+      app: customer-web-server
+  template:
+    metadata:
+      labels:
+        app: customer-web-server
+    spec:
+      containers:
+        - name: customer-web-server
+          image: customer-web-server:latest
+          imagePullPolicy: IfNotPresent  # Use local image for development
+          ports:
+            - containerPort: 5000
+          # Environment variables for service configuration
+          env:
+            - name: KAFKA_BOOTSTRAP_SERVERS
+              value: "kafka:9092"
+            - name: KAFKA_TOPIC
+              value: "purchases"
+            - name: CUSTOMER_MGMT_API_URL
+              value: "http://customer-management-api:5001"
+          # Liveness probe - restart container if unhealthy
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 5000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          # Readiness probe - only route traffic when ready
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 5000
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "256Mi"
+              cpu: "200m"

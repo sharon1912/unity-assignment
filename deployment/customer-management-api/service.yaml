@@ -1,0 +1,17 @@
+# Customer Management API Service
+# Internal service (ClusterIP) - only accessible within the cluster
+apiVersion: v1
+kind: Service
+metadata:
+  name: customer-management-api
+  namespace: purchase-system
+  labels:
+    app: customer-management-api
+spec:
+  # ClusterIP makes this service internal-only
+  type: ClusterIP
+  ports:
+    - port: 5001
+      targetPort: 5001
+  selector:
+    app: customer-management-api

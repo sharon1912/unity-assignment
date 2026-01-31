@@ -1,0 +1,19 @@
+# Customer Web Server Service
+# Exposes the customer-facing service externally
+apiVersion: v1
+kind: Service
+metadata:
+  name: customer-web-server
+  namespace: purchase-system
+  labels:
+    app: customer-web-server
+spec:
+  # NodePort for easy local testing
+  # Change to LoadBalancer for cloud deployments
+  type: NodePort
+  ports:
+    - port: 80
+      targetPort: 5000
+      nodePort: 30080  # Access via <node-ip>:30080
+  selector:
+    app: customer-web-server

@@ -1,0 +1,46 @@
+# Customer Management API Deployment
+# Internal service that consumes from Kafka and serves purchase data
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: customer-management-api
+  namespace: purchase-system
+  labels:
+    app: customer-management-api
+spec:
+  replicas: 1  # Single replica to avoid Kafka consumer group conflicts
+  selector:
+    matchLabels:
+      app: customer-management-api
+  template:
+    metadata:
+      labels:
+        app: customer-management-api
+    spec:
+      containers:
+        - name: customer-management-api
+          image: customer-management-api:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 5001
+          # Environment variables for service configuration
+          env:
+            - name: KAFKA_BOOTSTRAP_SERVERS
+              value: "kafka:9092"
+            - name: KAFKA_TOPIC
+              value: "purchases"
+            - name: KAFKA_CONSUMER_GROUP
+              value: "purchase-consumer-group"
+            - name: MONGODB_URI
+              value: "mongodb://mongodb:27017"
+            - name: MONGODB_DATABASE
+              value: "purchase_db"
+            - name: MONGODB_COLLECTION
+              value: "purchases"
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "256Mi"
+              cpu: "200m"

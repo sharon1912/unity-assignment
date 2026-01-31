@@ -1,0 +1,8 @@
+# Flask web framework
+flask==3.0.0
+
+# Kafka client for Python (kafka-python-ng is the maintained fork for Python 3.12+)
+kafka-python-ng==2.2.2
+
+# MongoDB client
+pymongo==4.6.0
