@@ -54,13 +54,20 @@ A microservices-based purchase tracking system built with Python, Apache Kafka, 
 │  │  HPA (2-10 pods)    │         │  HPA (1-5 pods)                    │   │
 │  └─────────────────────┘         └─────────────────────────────────────┘   │
 │           ▲                                                                 │
-│           │ NodePort :30080                                                │
+│           │ ClusterIP                                                      │
 │           │                                                                 │
-│  ┌────────┴────────┐              ┌─────────────┐    ┌─────────────────┐   │
-│  │  External       │              │   Kafka     │    │    MongoDB      │   │
-│  │  Traffic        │              │  (KRaft)    │    │  (StatefulSet)  │   │
-│  └─────────────────┘              │  Port 9092  │    │   Port 27017    │   │
-│                                   └─────────────┘    └─────────────────┘   │
+│  ┌─────────────────────┐          ┌─────────────┐    ┌─────────────────┐   │
+│  │  Nginx Ingress      │          │   Kafka     │    │    MongoDB      │   │
+│  │  (purchase.local)   │          │  (KRaft)    │    │  (StatefulSet)  │   │
+│  └──────────┬──────────┘          │  Port 9092  │    │   Port 27017    │   │
+│             │                     └─────────────┘    └─────────────────┘   │
+├─────────────┼───────────────────────────────────────────────────────────────┤
+│             │                    namespace: ingress-nginx                   │
+│             ▼                                                               │
+│  ┌─────────────────────┐                                                   │
+│  │  Ingress Controller │◄── External Traffic (http://purchase.local)      │
+│  │  (LoadBalancer)     │                                                   │
+│  └─────────────────────┘                                                   │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                             namespace: monitoring                            │
 │                                                                             │
@@ -187,7 +194,8 @@ home-assigment/
     │   └── kafka.yaml                     # Kafka Deployment + Service (KRaft)
     ├── customer-web-server/
     │   ├── deployment.yaml                # Web server Deployment + Prometheus annotations
-    │   ├── service.yaml                   # Web server Service (NodePort)
+    │   ├── service.yaml                   # Web server Service (ClusterIP)
+    │   ├── ingress.yaml                   # Nginx Ingress (purchase.local)
     │   └── hpa.yaml                       # Horizontal Pod Autoscaler (2-10 pods)
     └── customer-management-api/
         ├── deployment.yaml                # Management API Deployment + Prometheus annotations
@@ -358,10 +366,16 @@ metadata:
 
 | Service | Type | Port | Description |
 |---------|------|------|-------------|
-| `customer-web-server` | NodePort | 80 → 30080 | External access for customers |
+| `customer-web-server` | ClusterIP | 80 | Internal, exposed via Ingress |
 | `customer-management-api` | ClusterIP | 5001 | Internal only (called by web server) |
 | `kafka` | ClusterIP | 9092 | Internal only (message broker) |
 | `mongodb` | ClusterIP (Headless) | 27017 | Internal only (database) |
+
+### Ingress
+
+| Ingress | Host | Path | Backend |
+|---------|------|------|---------|
+| `customer-web-server-ingress` | `purchase.local` | `/` | `customer-web-server:80` |
 
 ### Deployments
 
@@ -532,7 +546,7 @@ brew install hey
 hey -n 1000 -c 50 -m POST \
     -H "Content-Type: application/json" \
     -d '{"username":"loadtest","userid":"test","price":10}' \
-    http://localhost:30080/buy
+    http://purchase.local/buy
 
 # Watch HPA react
 kubectl get hpa -n purchase-system -w
@@ -592,7 +606,20 @@ kind load docker-image customer-web-server:latest
 kind load docker-image customer-management-api:latest
 ```
 
-### Step 3: Deploy to Kubernetes
+### Step 3: Install Nginx Ingress Controller
+
+```bash
+# Install nginx ingress controller
+kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.9.5/deploy/static/provider/cloud/deploy.yaml
+
+# Wait for ingress controller to be ready
+kubectl rollout status deployment/ingress-nginx-controller -n ingress-nginx --timeout=90s
+
+# Add hostname to /etc/hosts (for local testing)
+echo "127.0.0.1 purchase.local" | sudo tee -a /etc/hosts
+```
+
+### Step 4: Deploy to Kubernetes
 
 ```bash
 # Create namespace
@@ -605,7 +632,7 @@ kubectl apply -f deployment/database/mongodb.yaml
 kubectl apply -f deployment/kafka/kafka.yaml
 kubectl wait --for=condition=ready pod -l app=kafka -n purchase-system --timeout=120s
 
-# Deploy applications
+# Deploy applications (includes ingress)
 kubectl apply -f deployment/customer-management-api/
 kubectl apply -f deployment/customer-web-server/
 
@@ -614,7 +641,7 @@ kubectl wait --for=condition=ready pod -l app=customer-web-server -n purchase-sy
 kubectl wait --for=condition=ready pod -l app=customer-management-api -n purchase-system --timeout=60s
 ```
 
-### Step 4: Deploy Monitoring Stack (Optional but Recommended)
+### Step 5: Deploy Monitoring Stack (Optional but Recommended)
 
 ```bash
 # Add Prometheus Helm repository
@@ -655,7 +682,7 @@ rules:
 EOF
 ```
 
-### Step 5: Apply HPAs
+### Step 6: Apply HPAs
 
 ```bash
 kubectl apply -f deployment/customer-web-server/hpa.yaml
@@ -665,7 +692,7 @@ kubectl apply -f deployment/customer-management-api/hpa.yaml
 kubectl get hpa -n purchase-system
 ```
 
-### Step 6: Verify Deployment
+### Step 7: Verify Deployment
 
 ```bash
 # Check all pods are running
@@ -692,21 +719,20 @@ kubectl get pods -n monitoring
 
 ### Access the API
 
-The Customer Web Server is exposed on NodePort 30080:
+The Customer Web Server is exposed via Nginx Ingress at `http://purchase.local`:
 
 ```bash
-# For Docker Desktop
-curl http://localhost:30080/health
+# If /etc/hosts is configured
+curl http://purchase.local/health
 
-# For minikube
-minikube service customer-web-server -n purchase-system --url
-# Then use the URL provided
+# Alternative: use Host header (no /etc/hosts needed)
+curl -H "Host: purchase.local" http://localhost/health
 ```
 
 ### Test 1: Create a Purchase
 
 ```bash
-curl -X POST http://localhost:30080/buy \
+curl -X POST http://purchase.local/buy \
   -H "Content-Type: application/json" \
   -d '{"username": "john", "userid": "user123", "price": 29.99}'
 ```
@@ -729,7 +755,7 @@ curl -X POST http://localhost:30080/buy \
 
 ```bash
 # Wait a moment for Kafka to process, then:
-curl http://localhost:30080/getAllUserBuys/user123
+curl http://purchase.local/getAllUserBuys/user123
 ```
 
 **Expected Response:**
@@ -753,17 +779,17 @@ curl http://localhost:30080/getAllUserBuys/user123
 
 ```bash
 # Add more purchases
-curl -X POST http://localhost:30080/buy \
+curl -X POST http://purchase.local/buy \
   -H "Content-Type: application/json" \
   -d '{"username": "john", "userid": "user123", "price": 15.50}'
 
-curl -X POST http://localhost:30080/buy \
+curl -X POST http://purchase.local/buy \
   -H "Content-Type: application/json" \
   -d '{"username": "john", "userid": "user123", "price": 42.00}'
 
 # Check total
 sleep 2
-curl http://localhost:30080/getAllUserBuys/user123 | python3 -m json.tool
+curl http://purchase.local/getAllUserBuys/user123 | python3 -m json.tool
 ```
 
 **Expected Response:**
@@ -784,34 +810,34 @@ curl http://localhost:30080/getAllUserBuys/user123 | python3 -m json.tool
 
 ```bash
 # Create purchase for different user
-curl -X POST http://localhost:30080/buy \
+curl -X POST http://purchase.local/buy \
   -H "Content-Type: application/json" \
   -d '{"username": "jane", "userid": "user456", "price": 99.99}'
 
 # Query each user separately
-curl http://localhost:30080/getAllUserBuys/user123
-curl http://localhost:30080/getAllUserBuys/user456
+curl http://purchase.local/getAllUserBuys/user123
+curl http://purchase.local/getAllUserBuys/user456
 ```
 
 ### Test 5: Error Handling
 
 ```bash
 # Missing required field
-curl -X POST http://localhost:30080/buy \
+curl -X POST http://purchase.local/buy \
   -H "Content-Type: application/json" \
   -d '{"username": "john"}'
 
 # Expected: {"error": "Missing required fields: ['userid', 'price']"}
 
 # Invalid price
-curl -X POST http://localhost:30080/buy \
+curl -X POST http://purchase.local/buy \
   -H "Content-Type: application/json" \
   -d '{"username": "john", "userid": "user123", "price": "invalid"}'
 
 # Expected: {"error": "Price must be a valid number"}
 
 # User with no purchases
-curl http://localhost:30080/getAllUserBuys/nonexistent
+curl http://purchase.local/getAllUserBuys/nonexistent
 
 # Expected: {"userid": "nonexistent", "purchases": [], "count": 0, "total_spent": 0}
 ```
@@ -820,7 +846,7 @@ curl http://localhost:30080/getAllUserBuys/nonexistent
 
 ```bash
 # Customer Web Server health
-curl http://localhost:30080/health
+curl http://purchase.local/health
 # Expected: {"status": "healthy"}
 
 # Customer Management API health (via port-forward)
@@ -833,7 +859,7 @@ curl http://localhost:5001/health
 
 ## API Reference
 
-### Customer Web Server (Port 30080)
+### Customer Web Server (via Ingress: http://purchase.local)
 
 | Endpoint | Method | Description | Request Body | Response |
 |----------|--------|-------------|--------------|----------|
@@ -931,7 +957,7 @@ kubectl get --raw /apis/custom.metrics.k8s.io/v1beta1 | head
 kubectl get pods -n monitoring | grep prometheus-adapter
 
 # Generate some traffic to populate metrics
-curl -X POST http://localhost:30080/buy \
+curl -X POST http://purchase.local/buy \
     -H "Content-Type: application/json" \
     -d '{"username":"test","userid":"test","price":10}'
 ```
@@ -953,8 +979,17 @@ kubectl get pods -n purchase-system -o jsonpath='{.items[*].metadata.annotations
 Remove all resources:
 
 ```bash
-# Delete the entire namespace (removes all resources)
+# Delete application namespace
 kubectl delete namespace purchase-system
+
+# Delete monitoring namespace (if installed)
+kubectl delete namespace monitoring
+
+# Delete ingress controller (if installed)
+kubectl delete namespace ingress-nginx
+
+# Remove hostname from /etc/hosts (optional)
+sudo sed -i '' '/purchase.local/d' /etc/hosts
 
 # Remove local Docker images (optional)
 docker rmi customer-web-server:latest customer-management-api:latest
@@ -985,9 +1020,11 @@ docker rmi customer-web-server:latest customer-management-api:latest
 - [ ] Add structured logging with correlation IDs
 - [ ] Use Helm charts for easier deployment
 - [x] Add horizontal pod autoscaling
+- [x] Add Nginx Ingress for external access
 - [ ] Add MongoDB authentication
 - [ ] Add Kafka Schema Registry for message validation
 - [ ] Add integration tests
 - [ ] Add CI/CD pipeline
 - [ ] Add Grafana dashboards for visualization
 - [ ] Add alerting rules for Prometheus
+- [ ] Add TLS/HTTPS support for Ingress
