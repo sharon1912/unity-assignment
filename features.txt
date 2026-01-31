@@ -1,6 +1,3 @@
 1. add username password for mongoDB(store creds in k8s secret)
-3. return error when user already exists
 4. helm chart everything
 5. CICD
-6. UI 
-7. ingress

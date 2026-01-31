@@ -1,0 +1,457 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Purchase Tracking System</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            min-height: 100vh;
+            color: #fff;
+            padding: 40px 20px;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+
+        h1 {
+            text-align: center;
+            margin-bottom: 40px;
+            font-size: 2.5rem;
+            background: linear-gradient(90deg, #00d9ff, #00ff88);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .card {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 16px;
+            padding: 30px;
+            margin-bottom: 30px;
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .card h2 {
+            margin-bottom: 20px;
+            color: #00d9ff;
+            font-size: 1.4rem;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 8px;
+            color: #aaa;
+            font-size: 0.9rem;
+        }
+
+        input {
+            width: 100%;
+            padding: 14px 18px;
+            border: 2px solid rgba(255, 255, 255, 0.1);
+            border-radius: 10px;
+            background: rgba(0, 0, 0, 0.3);
+            color: #fff;
+            font-size: 1rem;
+            transition: border-color 0.3s, box-shadow 0.3s;
+        }
+
+        input:focus {
+            outline: none;
+            border-color: #00d9ff;
+            box-shadow: 0 0 20px rgba(0, 217, 255, 0.2);
+        }
+
+        input::placeholder {
+            color: #666;
+        }
+
+        .btn {
+            padding: 14px 32px;
+            border: none;
+            border-radius: 10px;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #00d9ff, #00a8cc);
+            color: #fff;
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 30px rgba(0, 217, 255, 0.3);
+        }
+
+        .btn-secondary {
+            background: linear-gradient(135deg, #00ff88, #00cc6a);
+            color: #1a1a2e;
+        }
+
+        .btn-secondary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 30px rgba(0, 255, 136, 0.3);
+        }
+
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .btn-group {
+            display: flex;
+            gap: 15px;
+            flex-wrap: wrap;
+        }
+
+        .message {
+            margin-top: 20px;
+            padding: 15px 20px;
+            border-radius: 10px;
+            display: none;
+        }
+
+        .message.success {
+            background: rgba(0, 255, 136, 0.15);
+            border: 1px solid #00ff88;
+            color: #00ff88;
+            display: block;
+        }
+
+        .message.error {
+            background: rgba(255, 71, 87, 0.15);
+            border: 1px solid #ff4757;
+            color: #ff4757;
+            display: block;
+        }
+
+        .results {
+            margin-top: 20px;
+            display: none;
+        }
+
+        .results.show {
+            display: block;
+        }
+
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 20px;
+            margin-bottom: 25px;
+        }
+
+        .stat-card {
+            background: rgba(0, 217, 255, 0.1);
+            padding: 20px;
+            border-radius: 12px;
+            text-align: center;
+        }
+
+        .stat-value {
+            font-size: 2rem;
+            font-weight: 700;
+            color: #00d9ff;
+        }
+
+        .stat-label {
+            color: #aaa;
+            font-size: 0.85rem;
+            margin-top: 5px;
+        }
+
+        .purchases-list {
+            max-height: 400px;
+            overflow-y: auto;
+        }
+
+        .purchase-item {
+            background: rgba(0, 0, 0, 0.2);
+            padding: 18px;
+            border-radius: 10px;
+            margin-bottom: 12px;
+            border-left: 4px solid #00ff88;
+        }
+
+        .purchase-item:last-child {
+            margin-bottom: 0;
+        }
+
+        .purchase-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+
+        .purchase-user {
+            font-weight: 600;
+            color: #fff;
+        }
+
+        .purchase-price {
+            font-size: 1.2rem;
+            font-weight: 700;
+            color: #00ff88;
+        }
+
+        .purchase-time {
+            color: #666;
+            font-size: 0.85rem;
+        }
+
+        .no-purchases {
+            text-align: center;
+            padding: 40px;
+            color: #666;
+        }
+
+        .loading {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 2px solid rgba(255,255,255,0.3);
+            border-radius: 50%;
+            border-top-color: #fff;
+            animation: spin 0.8s linear infinite;
+            margin-right: 10px;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .input-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+
+        @media (max-width: 600px) {
+            .input-row {
+                grid-template-columns: 1fr;
+            }
+
+            .btn-group {
+                flex-direction: column;
+            }
+
+            h1 {
+                font-size: 1.8rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Purchase Tracking System</h1>
+
+        <div class="card">
+            <h2>Make a Purchase</h2>
+            <form id="purchaseForm">
+                <div class="input-row">
+                    <div class="form-group">
+                        <label for="username">Username</label>
+                        <input type="text" id="username" placeholder="Enter username" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="userid">User ID</label>
+                        <input type="text" id="userid" placeholder="Enter user ID" required>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label for="price">Price ($)</label>
+                    <input type="number" id="price" placeholder="Enter price" step="0.01" min="0.01" required>
+                </div>
+                <button type="submit" class="btn btn-primary" id="buyBtn">Buy</button>
+            </form>
+            <div id="buyMessage" class="message"></div>
+        </div>
+
+        <div class="card">
+            <h2>View Purchase History</h2>
+            <div class="form-group">
+                <label for="searchUserid">User ID</label>
+                <input type="text" id="searchUserid" placeholder="Enter user ID to search">
+            </div>
+            <button class="btn btn-secondary" id="getAllUserBuysBtn">getAllUserBuys</button>
+
+            <div id="searchMessage" class="message"></div>
+
+            <div id="results" class="results">
+                <div class="stats">
+                    <div class="stat-card">
+                        <div class="stat-value" id="totalCount">0</div>
+                        <div class="stat-label">Total Purchases</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="totalSpent">$0.00</div>
+                        <div class="stat-label">Total Spent</div>
+                    </div>
+                </div>
+                <h3 style="margin-bottom: 15px; color: #aaa;">Purchase History</h3>
+                <div class="purchases-list" id="purchasesList"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = '';  // Same origin, proxied by nginx
+
+        // Buy button handler
+        document.getElementById('purchaseForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            const buyBtn = document.getElementById('buyBtn');
+            const messageEl = document.getElementById('buyMessage');
+
+            const username = document.getElementById('username').value.trim();
+            const userid = document.getElementById('userid').value.trim();
+            const price = parseFloat(document.getElementById('price').value);
+
+            buyBtn.disabled = true;
+            buyBtn.innerHTML = '<span class="loading"></span>Processing...';
+            messageEl.className = 'message';
+
+            try {
+                const response = await fetch(`${API_BASE}/buy`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ username, userid, price })
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    messageEl.textContent = `Purchase successful! $${price.toFixed(2)} recorded for ${username}`;
+                    messageEl.className = 'message success';
+                    document.getElementById('price').value = '';
+                } else {
+                    messageEl.textContent = data.error || 'Purchase failed';
+                    messageEl.className = 'message error';
+                }
+            } catch (error) {
+                messageEl.textContent = 'Network error. Please try again.';
+                messageEl.className = 'message error';
+            } finally {
+                buyBtn.disabled = false;
+                buyBtn.textContent = 'Buy';
+            }
+        });
+
+        // getAllUserBuys button handler
+        document.getElementById('getAllUserBuysBtn').addEventListener('click', async () => {
+            const btn = document.getElementById('getAllUserBuysBtn');
+            const messageEl = document.getElementById('searchMessage');
+            const resultsEl = document.getElementById('results');
+
+            const userid = document.getElementById('searchUserid').value.trim();
+
+            if (!userid) {
+                messageEl.textContent = 'Please enter a User ID';
+                messageEl.className = 'message error';
+                resultsEl.className = 'results';
+                return;
+            }
+
+            btn.disabled = true;
+            btn.innerHTML = '<span class="loading"></span>Loading...';
+            messageEl.className = 'message';
+            resultsEl.className = 'results';
+
+            try {
+                const response = await fetch(`${API_BASE}/getAllUserBuys/${encodeURIComponent(userid)}`);
+                const data = await response.json();
+
+                if (response.ok) {
+                    displayResults(data);
+                    messageEl.className = 'message';
+                } else {
+                    messageEl.textContent = data.error || 'Failed to fetch purchases';
+                    messageEl.className = 'message error';
+                }
+            } catch (error) {
+                messageEl.textContent = 'Network error. Please try again.';
+                messageEl.className = 'message error';
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'getAllUserBuys';
+            }
+        });
+
+        function displayResults(data) {
+            const resultsEl = document.getElementById('results');
+            const purchasesListEl = document.getElementById('purchasesList');
+
+            document.getElementById('totalCount').textContent = data.count;
+            document.getElementById('totalSpent').textContent = `$${data.total_spent.toFixed(2)}`;
+
+            if (data.purchases.length === 0) {
+                purchasesListEl.innerHTML = '<div class="no-purchases">No purchases found for this user</div>';
+            } else {
+                purchasesListEl.innerHTML = data.purchases
+                    .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
+                    .map(purchase => `
+                        <div class="purchase-item">
+                            <div class="purchase-header">
+                                <span class="purchase-user">${escapeHtml(purchase.username)}</span>
+                                <span class="purchase-price">$${purchase.price.toFixed(2)}</span>
+                            </div>
+                            <div class="purchase-time">${formatDate(purchase.timestamp)}</div>
+                        </div>
+                    `).join('');
+            }
+
+            resultsEl.className = 'results show';
+        }
+
+        function formatDate(isoString) {
+            const date = new Date(isoString);
+            return date.toLocaleString('en-US', {
+                year: 'numeric',
+                month: 'short',
+                day: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit'
+            });
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        // Allow Enter key to trigger search
+        document.getElementById('searchUserid').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                document.getElementById('getAllUserBuysBtn').click();
+            }
+        });
+    </script>
+</body>
+</html>

@@ -29,6 +29,14 @@ A microservices-based purchase tracking system built with Python, Apache Kafka, 
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                            namespace: purchase-system                        │
 │                                                                             │
+│  ┌─────────────────┐                                                        │
+│  │  Customer UI    │◄── http://shop.local                                  │
+│  │  (Nginx)        │                                                        │
+│  │  - Static HTML  │                                                        │
+│  │  - Proxies API  │                                                        │
+│  └────────┬────────┘                                                        │
+│           │                                                                 │
+│           ▼                                                                 │
 │  ┌─────────────────────┐         ┌─────────────────────────────────────┐   │
 │  │  Customer Web       │         │  Customer Management API            │   │
 │  │  Server             │         │                                     │   │
@@ -53,19 +61,17 @@ A microservices-based purchase tracking system built with Python, Apache Kafka, 
 │  │                     │         │  └─────────────┘                   │   │
 │  │  HPA (2-10 pods)    │         │  HPA (1-5 pods)                    │   │
 │  └─────────────────────┘         └─────────────────────────────────────┘   │
-│           ▲                                                                 │
-│           │ ClusterIP                                                      │
-│           │                                                                 │
-│  ┌─────────────────────┐          ┌─────────────┐    ┌─────────────────┐   │
-│  │  Nginx Ingress      │          │   Kafka     │    │    MongoDB      │   │
-│  │  (purchase.local)   │          │  (KRaft)    │    │  (StatefulSet)  │   │
-│  └──────────┬──────────┘          │  Port 9092  │    │   Port 27017    │   │
-│             │                     └─────────────┘    └─────────────────┘   │
-├─────────────┼───────────────────────────────────────────────────────────────┤
-│             │                    namespace: ingress-nginx                   │
-│             ▼                                                               │
+│                                                                             │
+│                                   ┌─────────────┐    ┌─────────────────┐   │
+│                                   │   Kafka     │    │    MongoDB      │   │
+│                                   │  (KRaft)    │    │  (StatefulSet)  │   │
+│                                   │  Port 9092  │    │   Port 27017    │   │
+│                                   └─────────────┘    └─────────────────┘   │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                            namespace: ingress-nginx                          │
+│                                                                             │
 │  ┌─────────────────────┐                                                   │
-│  │  Ingress Controller │◄── External Traffic (http://purchase.local)      │
+│  │  Ingress Controller │◄── External Traffic (http://shop.local)          │
 │  │  (LoadBalancer)     │                                                   │
 │  └─────────────────────┘                                                   │
 ├─────────────────────────────────────────────────────────────────────────────┤
@@ -102,7 +108,19 @@ A microservices-based purchase tracking system built with Python, Apache Kafka, 
 
 ## Components
 
-### 1. Customer Web Server
+### 1. Customer UI
+
+**Purpose:** Web-based user interface for interacting with the purchase system.
+
+**Features:**
+- **Buy Button** - Submit purchase requests with username, userid, and price
+- **getAllUserBuys Button** - Display all purchases for a user with total spent
+
+**Technology:**
+- HTML5/CSS3/JavaScript (vanilla)
+- Nginx (reverse proxy + static file server)
+
+### 2. Customer Web Server
 
 **Purpose:** Customer-facing API gateway that handles incoming requests.
 
@@ -117,7 +135,7 @@ A microservices-based purchase tracking system built with Python, Apache Kafka, 
 - kafka-python-ng 2.2.2 (Kafka client)
 - requests 2.31.0 (HTTP client)
 
-### 2. Customer Management API
+### 3. Customer Management API
 
 **Purpose:** Internal service that manages purchase data and Kafka consumption.
 
@@ -132,7 +150,7 @@ A microservices-based purchase tracking system built with Python, Apache Kafka, 
 - kafka-python-ng 2.2.2 (Kafka client)
 - pymongo 4.6.0 (MongoDB client)
 
-### 3. Apache Kafka (KRaft Mode)
+### 4. Apache Kafka (KRaft Mode)
 
 **Purpose:** Message broker for asynchronous communication.
 
@@ -147,7 +165,7 @@ A microservices-based purchase tracking system built with Python, Apache Kafka, 
 - Single process acts as both broker and controller
 - Simpler configuration and faster startup
 
-### 4. MongoDB
+### 5. MongoDB
 
 **Purpose:** Document database for storing purchase records.
 
