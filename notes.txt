@@ -1,0 +1,8 @@
+# Features
+- Helm chart for all deployments
+- CI/CD pipeline integration
+- Single source of truth for configuration
+
+# Testing Notes
+- Code testing only (assumes Kafka and MongoDB are managed services)
+- Separate test instances for MongoDB and Kafka (isolated from production)
